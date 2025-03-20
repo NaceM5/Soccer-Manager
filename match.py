@@ -49,10 +49,77 @@ class Match:
         self.home_players = home_team.get_starting_eleven()
         self.away_players = away_team.get_starting_eleven()
         
+        # Store original attributes for restoration after match
+        self.original_attributes = {}
+        
+        # Initialize player ratings dictionary
+        self.player_ratings = {}
+        
+        # Apply temporary boosts for high potential youth players
+        self._apply_youth_potential_boosts()
+        
         # Reset match stats
         for player in self.home_players + self.away_players:
             for stat in player.stats:
                 player.stats[stat] = 0
+
+    def _apply_youth_potential_boosts(self):
+        """Applies temporary attribute boosts to high potential youth players"""
+        for player in self.home_players + self.away_players:
+            if player.youth and player.true_potential > 86:
+                # Store original attributes
+                self.original_attributes[player] = {
+                    attr: value for attr, value in player.attributes.items()
+                }
+                if player.position == Position.GK:
+                    self.original_attributes[player].update({
+                        attr: value for attr, value in player.gk_attributes.items()
+                    })
+                
+                # Calculate boost based on potential
+                boost_amount = (player.true_potential - 86) * 2  # 2 point boost per potential point above 86
+                
+                # Apply position-specific boosts
+                if player.position == Position.GK:
+                    self._boost_goalkeeper_attributes(player, boost_amount)
+                elif player.position in [Position.CB, Position.WB]:
+                    self._boost_defender_attributes(player, boost_amount)
+                elif player.position in [Position.CDM, Position.CM]:
+                    self._boost_midfielder_attributes(player, boost_amount)
+                elif player.position in [Position.CAM, Position.LW, Position.RW]:
+                    self._boost_attacking_midfielder_attributes(player, boost_amount)
+                elif player.position == Position.ST:
+                    self._boost_striker_attributes(player, boost_amount)
+
+    def _boost_goalkeeper_attributes(self, player, boost_amount):
+        """Boosts goalkeeper-specific attributes"""
+        boost_attrs = ["diving", "handling", "positioning"]
+        for attr in boost_attrs:
+            player.gk_attributes[attr] = min(99, player.gk_attributes[attr] + boost_amount)
+
+    def _boost_defender_attributes(self, player, boost_amount):
+        """Boosts defender-specific attributes"""
+        boost_attrs = ["tackling", "defensive_iq", "strength", "jumping"]
+        for attr in boost_attrs:
+            player.attributes[attr] = min(99, player.attributes[attr] + boost_amount)
+
+    def _boost_midfielder_attributes(self, player, boost_amount):
+        """Boosts midfielder-specific attributes"""
+        boost_attrs = ["playmaking", "passing", "midfield_iq", "stamina"]
+        for attr in boost_attrs:
+            player.attributes[attr] = min(99, player.attributes[attr] + boost_amount)
+
+    def _boost_attacking_midfielder_attributes(self, player, boost_amount):
+        """Boosts attacking midfielder-specific attributes"""
+        boost_attrs = ["dribbling", "passing", "attacking_iq", "speed", "off_ball_movement"]
+        for attr in boost_attrs:
+            player.attributes[attr] = min(99, player.attributes[attr] + boost_amount)
+
+    def _boost_striker_attributes(self, player, boost_amount):
+        """Boosts striker-specific attributes"""
+        boost_attrs = ["finishing", "attacking_iq", "dribbling_skills", "off_ball_movement"]
+        for attr in boost_attrs:
+            player.attributes[attr] = min(99, player.attributes[attr] + boost_amount)
 
     def _get_player_display(self, player):
         """Returns player name with team name and position in team color"""
@@ -62,45 +129,66 @@ class Match:
         return f"{team_color}{player.name} ({player.position.abbreviation}, {team_name}){Style.RESET_ALL}"
 
     def simulate(self):
+        """Simulates the match and returns the result"""
+        # Store starting elevens for later reference
+        self.team1_starters = self.home_players.copy()
+        self.team2_starters = self.away_players.copy()
+        
+        # Simulate the match
+        self._simulate_match()
+        
+        # Process improvements for all players who played
+        for player in self.team1_starters + self.team2_starters:
+            if player in self.player_ratings:
+                player.improve_from_match(self.player_ratings[player])
+        
+        return self._get_match_result()
+
+    def _simulate_match(self):
         """Simulates the entire match"""
-        if not self.silent:
-            print(f"\n{Fore.CYAN}Match Starting: {self.home_color}{self.home_team.name}{Style.RESET_ALL} vs {self.away_color}{self.away_team.name}{Style.RESET_ALL}")
-            print("Press Enter at any time to skip to the end of the match...")
-        
-        # Determine initial possession
-        self.possession_team = random.choice([self.home_team, self.away_team])
-        self.player_with_ball = self._get_random_midfielder(self.possession_team)
-        
-        import select
-        import sys
-        
-        # Simulate 90 minutes
-        while self.minute < 90:
-            self.minute += 1
+        try:
+            if not self.silent:
+                print(f"\n{Fore.CYAN}Match Starting: {self.home_color}{self.home_team.name}{Style.RESET_ALL} vs {self.away_color}{self.away_team.name}{Style.RESET_ALL}")
+                print("Press Enter at any time to skip to the end of the match...")
             
-            # Check for Enter key press (skip to end) only if not silent
-            if not self.silent and sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
-                line = sys.stdin.readline()
-                if line == '\n':
-                    if not self.silent:
-                        print(f"\n{Fore.YELLOW}Skipping to end of match...{Style.RESET_ALL}")
-                    # Simulate remaining minutes without commentary
-                    while self.minute < 90:
-                        self.minute += 1
-                        if self.minute % self.action_frequency == 0:
-                            self._simulate_action(skip_commentary=True)
-                        self._update_player_states()
-                    break
+            # Determine initial possession
+            self.possession_team = random.choice([self.home_team, self.away_team])
+            self.player_with_ball = self._get_random_midfielder(self.possession_team)
             
-            if self.minute % self.action_frequency == 0:  # Action frequency based on settings
-                self._simulate_action()
+            import select
+            import sys
+            
+            # Simulate 90 minutes
+            while self.minute < 90:
+                self.minute += 1
                 
-            # Update player states
-            self._update_player_states()
+                # Check for Enter key press (skip to end) only if not silent
+                if not self.silent and sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+                    line = sys.stdin.readline()
+                    if line == '\n':
+                        if not self.silent:
+                            print(f"\n{Fore.YELLOW}Skipping to end of match...{Style.RESET_ALL}")
+                        # Simulate remaining minutes without commentary
+                        while self.minute < 90:
+                            self.minute += 1
+                            if self.minute % self.action_frequency == 0:
+                                self._simulate_action(skip_commentary=True)
+                            self._update_player_states()
+                        break
+                
+                if self.minute % self.action_frequency == 0:  # Action frequency based on settings
+                    self._simulate_action()
+                    
+                # Update player states
+                self._update_player_states()
+                
+            # Print final score only if not silent
+            if not self.silent:
+                self._print_final_score()
             
-        # Print final score only if not silent
-        if not self.silent:
-            self._print_final_score()
+        finally:
+            # Restore original attributes after match
+            self._restore_original_attributes()
         
     def _simulate_action(self, skip_commentary=False):
         """Simulates a single action in the match"""
@@ -229,14 +317,27 @@ class Match:
                 
             player.stats["goals"] += 1
             player.stats["shots_on_target"] += 1
+            player.update_match_rating("goal", True)  # Big boost for scoring
             
-            self._add_event(f"{Fore.GREEN}GOAL! {self._get_player_display(player)} scores!{Style.RESET_ALL}", skip_commentary)
+            # Find the last passer for assist
+            last_event = next((event for event in reversed(self.events) 
+                             if event.event_type == "pass" and event.team == self.possession_team 
+                             and event.player != player), None)
+            
+            if last_event and last_event.player:
+                last_event.player.stats["assists"] += 1
+                last_event.player.update_match_rating("assist", True)  # Boost for assist
+                self._add_event(f"{Fore.GREEN}GOAL! {self._get_player_display(player)} scores! Assisted by {self._get_player_display(last_event.player)}{Style.RESET_ALL}", skip_commentary)
+            else:
+                self._add_event(f"{Fore.GREEN}GOAL! {self._get_player_display(player)} scores!{Style.RESET_ALL}", skip_commentary)
         else:
             # Miss or save
             if random.random() < 0.5:  # Shot on target but saved
                 player.stats["shots_on_target"] += 1
+                player.update_match_rating("shot_on_target", True)
                 self._add_event(f"Shot on target by {self._get_player_display(player)}, but saved!", skip_commentary)
             else:  # Shot off target
+                player.update_match_rating("shot_off_target", False)
                 self._add_event(f"Shot by {self._get_player_display(player)} goes wide!", skip_commentary)
                 
         # Reset possession
@@ -280,6 +381,7 @@ class Match:
         if random.random() < pass_chance:
             # Successful pass
             passer.stats["passes_completed"] += 1
+            passer.update_match_rating("successful_pass", True)
             self.player_with_ball = receiver
             
             # Different commentary based on pass type
@@ -287,13 +389,17 @@ class Match:
             receiver_pos = self.position_distances[receiver.position]
             
             if abs(passer_pos - receiver_pos) > 0.4:  # Long pass
-                self._add_event(f"Long pass from {self._get_player_display(passer)} finds {self._get_player_display(receiver)}", skip_commentary)
+                self._add_event(f"Long pass from {self._get_player_display(passer)} finds {self._get_player_display(receiver)}", skip_commentary, 
+                              player=passer, team=self.possession_team, event_type="pass")
             elif receiver.on_run > 0:  # Through ball to running player
-                self._add_event(f"Great through ball from {self._get_player_display(passer)} to {self._get_player_display(receiver)}", skip_commentary)
+                self._add_event(f"Great through ball from {self._get_player_display(passer)} to {self._get_player_display(receiver)}", skip_commentary,
+                              player=passer, team=self.possession_team, event_type="pass")
             else:  # Normal pass
-                self._add_event(f"Nice pass from {self._get_player_display(passer)} to {self._get_player_display(receiver)}", skip_commentary)
+                self._add_event(f"Nice pass from {self._get_player_display(passer)} to {self._get_player_display(receiver)}", skip_commentary,
+                              player=passer, team=self.possession_team, event_type="pass")
         else:
             # Failed pass
+            passer.update_match_rating("failed_pass", False)
             self._add_event(f"{self._get_player_display(passer)}'s pass is intercepted", skip_commentary)
             self._switch_possession()
 
@@ -429,8 +535,12 @@ class Match:
         if dribble_chance > tackle_chance:
             self._add_event(f"{self._get_player_display(attacker)} skillfully dribbles past {self._get_player_display(defender)}", skip_commentary)
             attacker.open = min(1.0, attacker.open + 0.2)  # Increased space
+            attacker.update_match_rating("successful_dribble", True)
+            defender.update_match_rating("failed_tackle", False)
         else:
             defender.stats["tackles_won"] += 1
+            defender.update_match_rating("successful_tackle", True)
+            attacker.update_match_rating("failed_dribble", False)
             self._add_event(f"{self._get_player_display(defender)} wins the ball from {self._get_player_display(attacker)}", skip_commentary)
             self.player_with_ball = defender
             self._switch_possession()
@@ -523,9 +633,9 @@ class Match:
             else:
                 player.on_run = 0
 
-    def _add_event(self, description, skip_commentary=False):
+    def _add_event(self, description, skip_commentary=False, player=None, team=None, event_type=None):
         """Adds a match event and prints it"""
-        event = MatchEvent(self.minute, description)
+        event = MatchEvent(self.minute, description, player, team, event_type)
         self.events.append(event)
         if not skip_commentary and not self.silent:
             print(f"{Fore.YELLOW}[{self.minute}'] {Style.RESET_ALL}{description}")
@@ -539,6 +649,24 @@ class Match:
         print(f"\nFinal Score:")
         print(f"{self.home_team.name} {self.home_score} - {self.away_score} {self.away_team.name}")
         
+        # Finalize match ratings and find best performer
+        all_players = self.home_players + self.away_players
+        for player in all_players:
+            # Add clean sheet bonus for goalkeepers and defenders
+            if ((self.home_score == 0 and player in self.away_players) or 
+                (self.away_score == 0 and player in self.home_players)):
+                if player.position in [Position.GK, Position.CB, Position.WB]:
+                    player.update_match_rating("clean_sheet_minute", True)
+            
+            # Finalize the rating and store it
+            final_rating = player.finalize_match_rating()
+            self.player_ratings[player] = final_rating
+        
+        # Find best performer
+        best_player = max(all_players, key=lambda p: self.player_ratings.get(p, 0))
+        
+        print(f"\n{Fore.YELLOW}Man of the Match: {self._get_player_display(best_player)} - Rating: {self.player_ratings[best_player]:.1f}{Style.RESET_ALL}")
+        
         print("\nMatch Statistics:")
         print(f"{self.home_team.name}:")
         self._print_team_stats(self.home_players)
@@ -549,7 +677,10 @@ class Match:
         self._print_team_stats(self.away_players)
         
         # Update season and career statistics for players who started
-        for player in self.home_players + self.away_players:
+        for player in all_players:
+            # Update matches_played and minutes_played
+            player.stats["matches_played"] = 1
+            player.stats["minutes_played"] = 90  # Full match
             player.update_season_stats()
             player.update_career_stats()
 
@@ -560,4 +691,30 @@ class Match:
         print("Shots on Target:", sum(p.stats["shots_on_target"] for p in players))
         print("Passes Completed:", sum(p.stats["passes_completed"] for p in players))
         print("Pass Accuracy:", f"{sum(p.stats['passes_completed'] for p in players) / max(1, sum(p.stats['passes_attempted'] for p in players)):.2%}")
-        print("Tackles Won:", sum(p.stats["tackles_won"] for p in players)) 
+        print("Tackles Won:", sum(p.stats["tackles_won"] for p in players))
+        
+        # Print individual player ratings
+        print("\nPlayer Ratings:")
+        for player in sorted(players, key=lambda p: self.player_ratings.get(p, 0), reverse=True):
+            rating = self.player_ratings.get(player, 6.0)
+            print(f"{player.name}: {rating:.1f}")
+
+    def _restore_original_attributes(self):
+        """Restores original attributes after the match"""
+        for player, original_attrs in self.original_attributes.items():
+            for attr, value in original_attrs.items():
+                if attr in player.attributes:
+                    player.attributes[attr] = value
+                elif hasattr(player, 'gk_attributes') and attr in player.gk_attributes:
+                    player.gk_attributes[attr] = value 
+
+    def _get_match_result(self):
+        """Returns the match result in a standardized format"""
+        return {
+            'home_team': self.home_team,
+            'away_team': self.away_team,
+            'home_score': self.home_score,
+            'away_score': self.away_score,
+            'events': self.events,
+            'player_ratings': self.player_ratings
+        } 

@@ -30,6 +30,9 @@ class League:
         if start_date is None:
             start_date = datetime.now()
             
+        # Clear existing fixtures
+        self.fixtures = []
+            
         # Generate all possible combinations of teams
         matches = list(combinations(self.teams, 2))
         
@@ -58,18 +61,53 @@ class League:
         # Shuffle fixtures
         random.shuffle(all_fixtures)
         
+        # Calculate total weeks needed (each team plays every other team twice)
+        total_weeks = (len(self.teams) - 1) * 2  # Each team plays every other team twice
+        
         # Assign weeks and dates
-        total_weeks = len(all_fixtures) // (len(self.teams) // 2)
         current_date = start_date
         
-        for week in range(total_weeks):
-            week_fixtures = all_fixtures[week * (len(self.teams) // 2):(week + 1) * (len(self.teams) // 2)]
-            for fixture in week_fixtures:
-                fixture["week"] = week + 1
-                fixture["date"] = current_date
-            current_date += timedelta(days=7)
-            
-        self.fixtures = all_fixtures
+        # Create a list to track which teams have played in each week
+        weekly_teams = {week: set() for week in range(total_weeks)}
+        
+        # First pass: Try to distribute fixtures evenly
+        for fixture in all_fixtures:
+            assigned = False
+            for week in range(total_weeks):
+                if (fixture["home"] not in weekly_teams[week] and 
+                    fixture["away"] not in weekly_teams[week]):
+                    fixture["week"] = week + 1
+                    fixture["date"] = current_date + timedelta(days=week*7)
+                    weekly_teams[week].add(fixture["home"])
+                    weekly_teams[week].add(fixture["away"])
+                    assigned = True
+                    break
+            if assigned:
+                self.fixtures.append(fixture)
+        
+        # Second pass: If any fixtures weren't assigned, try to fit them in
+        remaining_fixtures = [f for f in all_fixtures if f not in self.fixtures]
+        for fixture in remaining_fixtures:
+            for week in range(total_weeks):
+                if (fixture["home"] not in weekly_teams[week] or 
+                    fixture["away"] not in weekly_teams[week]):
+                    fixture["week"] = week + 1
+                    fixture["date"] = current_date + timedelta(days=week*7)
+                    weekly_teams[week].add(fixture["home"])
+                    weekly_teams[week].add(fixture["away"])
+                    self.fixtures.append(fixture)
+                    break
+        
+        # Sort fixtures by week
+        self.fixtures.sort(key=lambda x: x["week"])
+        
+        # Verify fixture distribution
+        for team in self.teams:
+            team_fixtures = self.get_team_fixtures(team)
+            expected_fixtures = (len(self.teams) - 1) * 2
+            if len(team_fixtures) != expected_fixtures:
+                print(f"Warning: {team.name} has {len(team_fixtures)} fixtures, expected {expected_fixtures}")
+                print(f"Weeks played: {[f['week'] for f in team_fixtures]}")
         
     def get_week_fixtures(self, week):
         """Returns fixtures for a specific week"""
@@ -171,4 +209,17 @@ class League:
         """Returns the next unplayed fixture for a team"""
         team_fixtures = self.get_team_fixtures(team)
         unplayed = [f for f in team_fixtures if not f["played"]]
-        return min(unplayed, key=lambda x: x["week"]) if unplayed else None 
+        
+        # If there are no unplayed fixtures, check if all fixtures in the league are played
+        if not unplayed:
+            all_fixtures_played = all(f["played"] for f in self.fixtures)
+            if all_fixtures_played:
+                return None  # Season is complete
+            else:
+                # If some fixtures are not marked as played but we have no more team fixtures,
+                # something might be wrong with the fixture generation
+                print("Warning: No more fixtures for team but season is not complete!")
+                return None
+                
+        # Return the fixture with the lowest week number
+        return min(unplayed, key=lambda x: x["week"]) 
